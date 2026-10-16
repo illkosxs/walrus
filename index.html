@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Спит ли морж?</title>
+
+<!-- ============================================================
+     Если сайт НЕ на GitHub Pages (или на своём домене) —
+     впишите сюда owner и repo. На GitHub Pages можно оставить пустым.
+     ============================================================ -->
+<script>
+  window.WALRUS_CONFIG = {
+    owner:  '',        // например: 'vasya'
+    repo:   '',        // например: 'walrus'
+    branch: 'main',
+    path:   'state.json'
+  };
+</script>
+
+<style>
+  :root{
+    --sky-top:#05121f;
+    --sky-mid:#0e2f50;
+    --sky-bot:#1d5480;
+    --ice:#e6f4ff;
+    --star-op:1;
+  }
+  body.awake{
+    --sky-top:#2f7fc4;
+    --sky-mid:#7cc2ea;
+    --sky-bot:#cdeaff;
+    --ice:#ffffff;
+    --star-op:0;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; margin:0; }
+
+  body{
+    font-family:"Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", sans-serif;
+    overflow:hidden;
+    background:#05121f;
+    color:#fff;
+    -webkit-tap-highlight-color:transparent;
+  }
+
+  /* ---------- фон ---------- */
+  #scene{ position:fixed; inset:0; }
+  #scene svg{ width:100%; height:100%; display:block; }
+
+  #stars{ opacity:var(--star-op); transition:opacity .6s ease; }
+  #skyRect{ transition:fill .6s ease; }
+
+  body.sleeping #eyesOpen,
+  body.sleeping #alert  { display:none; }
+  body.awake    #eyesClosed,
+  body.awake    #zzz    { display:none; }
+
+  /* ---------- текст ---------- */
+  #overlay{
+    position:fixed; inset:0;
+    display:flex; flex-direction:column;
+    justify-content:space-between; align-items:center;
+    padding:clamp(18px,4vh,60px) 18px;
+    text-align:center;
+    pointer-events:none;
+    transition:padding-bottom .25s ease;
+  }
+  body.admin-visible #overlay{ padding-bottom:130px; }
+
+  h1{
+    margin:0;
+    font-size:clamp(30px, 7vw, 96px);
+    font-weight:900;
+    letter-spacing:-.02em;
+    line-height:1.05;
+    text-shadow:0 6px 30px rgba(0,0,0,.65), 0 2px 6px rgba(0,0,0,.55);
+  }
+
+  #answer{
+    margin:0;
+    font-size:clamp(26px, 6.2vw, 84px);
+    font-weight:900;
+    line-height:1.1;
+    letter-spacing:-.02em;
+    text-shadow:0 6px 30px rgba(0,0,0,.65), 0 2px 6px rgba(0,0,0,.55);
+    transition:opacity .35s ease;
+  }
+
+  /* ---------- админка ---------- */
+  #admin{
+    position:fixed; left:50%; bottom:16px; transform:translateX(-50%) translateY(20px);
+    display:none;
+    flex-direction:column; align-items:center; gap:10px;
+    background:rgba(8,17,30,.86);
+    -webkit-backdrop-filter:blur(10px);
+    backdrop-filter:blur(10px);
+    border:1px solid rgba(255,255,255,.16);
+    border-radius:18px;
+    padding:12px 16px;
+    z-index:50;
+    max-width:min(760px, 94vw);
+    box-shadow:0 18px 50px rgba(0,0,0,.5);
+    opacity:0;
+    transition:opacity .2s ease, transform .2s ease;
+  }
+  #admin.show{ display:flex; opacity:1; transform:translateX(-50%) translateY(0); }
+
+  #setup, #controls{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; }
+
+  #tokenInput{
+    width:min(430px, 72vw);
+    padding:11px 13px;
+    border-radius:11px;
+    border:1px solid rgba(255,255,255,.22);
+    background:rgba(255,255,255,.07);
+    color:#fff;
+    font-size:14px;
+    font-family:inherit;
+    outline:none;
+  }
+  #tokenInput:focus{ border-color:#6fb6ff; background:rgba(255,255,255,.12); }
+  #tokenInput::placeholder{ color:rgba(255,255,255,.45); }
+
+  .btn{
+    font-family:inherit;
+    font-size:15px;
+    font-weight:700;
+    padding:11px 17px;
+    border-radius:11px;
+    border:1px solid rgba(255,255,255,.2);
+    background:rgba(255,255,255,.1);
+    color:#fff;
+    cursor:pointer;
+    transition:transform .12s ease, background .15s ease, opacity .15s;
+    white-space:nowrap;
+  }
+  .btn:hover{ background:rgba(255,255,255,.2); }
+  .btn:active{ transform:scale(.96); }
+  .btn:disabled{ opacity:.45; cursor:default; }
+
+  .btn.sleep{ background:rgba(70,120,220,.45); border-color:rgba(120,170,255,.5); }
+  .btn.sleep:hover{ background:rgba(70,120,220,.7); }
+  .btn.awake{ background:rgba(230,160,40,.4); border-color:rgba(255,200,90,.5); }
+  .btn.awake:hover{ background:rgba(230,160,40,.68); }
+
+  #logout{
+    padding:11px 13px;
+    background:rgba(255,255,255,.06);
+    color:rgba(255,255,255,.7);
+    font-weight:400;
+  }
+
+  #status{
+    font-size:13px;
+    color:rgba(255,255,255,.72);
+    min-height:16px;
+    text-align:center;
+    line-height:1.3;
+  }
+  #status.err{ color:#ff8a8a; }
+  #status.ok{ color:#7fe3a0; }
+</style>
+</head>
+
+<body class="sleeping">
+
+<!-- ================= ФОН ================= -->
+<div id="scene">
+  <svg viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <defs>
+      <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="var(--sky-top)"/>
+        <stop offset="55%"  stop-color="var(--sky-mid)"/>
+        <stop offset="100%" stop-color="var(--sky-bot)"/>
+      </linearGradient>
+    </defs>
+
+    <rect id="skyRect" width="1000" height="700" fill="url(#skyGrad)"/>
+
+    <!-- звёзды -->
+    <g id="stars" fill="#ffffff">
+      <circle cx="80"  cy="70"  r="2.6" opacity=".9"/>
+      <circle cx="180" cy="140" r="1.8" opacity=".7"/>
+      <circle cx="265" cy="60"  r="3"   opacity=".85"/>
+      <circle cx="340" cy="175" r="2"   opacity=".6"/>
+      <circle cx="430" cy="90"  r="2.4" opacity=".8"/>
+      <circle cx="530" cy="55"  r="1.7" opacity=".65"/>
+      <circle cx="615" cy="150" r="2.8" opacity=".85"/>
+      <circle cx="700" cy="72"  r="2"   opacity=".7"/>
+      <circle cx="790" cy="185" r="2.3" opacity=".75"/>
+      <circle cx="880" cy="95"  r="3"   opacity=".9"/>
+      <circle cx="945" cy="200" r="1.8" opacity=".6"/>
+      <circle cx="120" cy="245" r="2.1" opacity=".55"/>
+      <circle cx="500" cy="215" r="1.6" opacity=".5"/>
+      <circle cx="660" cy="260" r="2.2" opacity=".55"/>
+      <circle cx="55"  cy="180" r="1.6" opacity=".5"/>
+      <circle cx="960" cy="45"  r="2.2" opacity=".7"/>
+      <circle cx="380" cy="265" r="1.5" opacity=".45"/>
+      <circle cx="245" cy="215" r="1.9" opacity=".5"/>
+    </g>
+
+    <!-- льдина -->
+    <ellipse cx="500" cy="655" rx="545" ry="160" fill="var(--ice)"/>
+    <ellipse cx="500" cy="670" rx="500" ry="120" fill="#9fc9e6" opacity=".35"/>
+
+    <!-- морж -->
+    <g id="walrus">
+      <!-- задний ласт -->
+      <ellipse cx="778" cy="565" rx="92" ry="48" fill="#75563d" transform="rotate(-14 778 565)"/>
+
+      <!-- тело -->
+      <ellipse cx="500" cy="530" rx="292" ry="146" fill="#8a6a4f"/>
+      <ellipse cx="500" cy="505" rx="265" ry="112" fill="#9c7a5c" opacity=".5"/>
+
+      <!-- голова -->
+      <ellipse cx="500" cy="372" rx="182" ry="142" fill="#a3805f"/>
+
+      <!-- морда -->
+      <circle cx="436" cy="442" r="78" fill="#d9b48f"/>
+      <circle cx="564" cy="442" r="78" fill="#d9b48f"/>
+      <ellipse cx="500" cy="432" rx="82" ry="56" fill="#d9b48f"/>
+
+      <!-- нос -->
+      <ellipse cx="500" cy="392" rx="45" ry="31" fill="#3b2a1e"/>
+      <ellipse cx="486" cy="382" rx="13" ry="9" fill="#6b5344" opacity=".75"/>
+
+      <!-- усы -->
+      <g stroke="#5b4433" stroke-width="4.5" stroke-linecap="round" opacity=".7">
+        <path d="M368 430 l-58 -20"/>
+        <path d="M366 450 l-60 4"/>
+        <path d="M632 430 l58 -20"/>
+        <path d="M634 450 l60 4"/>
+      </g>
+
+      <!-- клыки -->
+      <path d="M446 482 C 441 546, 433 592, 425 628 C 445 645, 470 638, 476 621 C 480 572, 480 522, 482 480 Z" fill="#fdfaf2"/>
+      <path d="M554 482 C 559 546, 567 592, 575 628 C 555 645, 530 638, 524 621 C 520 572, 520 522, 518 480 Z" fill="#fdfaf2"/>
+
+      <!-- передние ласты -->
+      <ellipse cx="292" cy="608" rx="98" ry="48" fill="#75563d" transform="rotate(-8 292 608)"/>
+      <ellipse cx="708" cy="608" rx="98" ry="48" fill="#75563d" transform="rotate(8 708 608)"/>
+
+      <!-- ГЛАЗА: закрытые -->
+      <g id="eyesClosed" stroke="#3b2a1e" stroke-width="11" fill="none" stroke-linecap="round">
+        <path d="M392 344 q32 27 64 0"/>
+        <path d="M544 344 q32 27 64 0"/>
+      </g>
+
+      <!-- ГЛАЗА: открытые -->
+      <g id="eyesOpen">
+        <circle cx="424" cy="338" r="33" fill="#ffffff"/>
+        <circle cx="576" cy="338" r="33" fill="#ffffff"/>
+        <circle cx="430" cy="342" r="16" fill="#1b1b1b"/>
+        <circle cx="570" cy="342" r="16" fill="#1b1b1b"/>
+        <circle cx="422" cy="332" r="6.5" fill="#ffffff"/>
+        <circle cx="562" cy="332" r="6.5" fill="#ffffff"/>
+      </g>
+    </g>
+
+    <!-- Zzz (спит) -->
+    <g id="zzz" fill="#ffffff" font-family="Georgia, 'Times New Roman', serif" font-weight="700" opacity=".92">
+      <text x="690" y="308" font-size="56">Z</text>
+      <text x="752" y="232" font-size="76">Z</text>
+      <text x="828" y="140" font-size="104">Z</text>
+    </g>
+
+    <!-- ! (бодрствует) -->
+    <g id="alert" font-family="'Segoe UI', system-ui, sans-serif" font-weight="900">
+      <text x="720" y="255" font-size="150" fill="#ffd93b">!</text>
+      <text x="845" y="150" font-size="90"  fill="#ffd93b" opacity=".7">!</text>
+      <g stroke="#ffd93b" stroke-width="10" stroke-linecap="round" opacity=".8">
+        <path d="M180 250 l-42 -32"/>
+        <path d="M158 315 l-52 -8"/>
+        <path d="M196 190 l-26 -44"/>
+      </g>
+    </g>
+  </svg>
+</div>
+
+<!-- ================= ТЕКСТ ================= -->
+<div id="overlay">
+  <h1>Спит ли морж?</h1>
+  <p id="answer">…</p>
+</div>
+
+<!-- ================= АДМИНКА ================= -->
+<div id="admin">
+  <div id="setup">
+    <input id="tokenInput" type="password" autocomplete="off" spellcheck="false"
+           placeholder="GitHub token (Contents: Read and write)">
+    <button class="btn" id="saveToken">Сохранить</button>
+  </div>
+
+  <div id="controls">
+    <button class="btn sleep" data-sleep="1">😴 Да, морж спит</button>
+    <button class="btn awake" data-sleep="0">👀 Нет, морж бодрствует</button>
+    <button class="btn" id="logout" title="Забыть токен на этом устройстве">✕</button>
+  </div>
+
+  <div id="status"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ======================= КОНФИГ ======================= */
+  var CFG = window.WALRUS_CONFIG || {};
+
+  function detectRepo() {
+    var m = location.hostname.match(/^([^.]+)\.github\.io$/i);
+    if (!m) return null;
+    var parts = location.pathname.split('/').filter(Boolean);
+    return {
+      owner: m[1],
+      repo: parts.length ? parts[0] : (m[1] + '.github.io')
+    };
+  }
+
+  var auto    = detectRepo() || {};
+  var OWNER   = CFG.owner  || auto.owner;
+  var REPO    = CFG.repo   || auto.repo;
+  var BRANCH  = CFG.branch || 'main';
+  var PATH    = CFG.path   || 'state.json';
+
+  var TOKEN_KEY = 'walrus_gh_token';
+  var CACHE_KEY = 'walrus_last_state';
+  var DEFAULT_SLEEPING = true;
+
+  var currentSleeping = null;
+
+  /* ======================= ОТРИСОВКА ======================= */
+  var answerEl = document.getElementById('answer');
+
+  function render(sleeping, animate) {
+    currentSleeping = sleeping;
+    document.body.classList.toggle('sleeping', sleeping);
+    document.body.classList.toggle('awake', !sleeping);
+    answerEl.textContent = sleeping ? 'Да, морж спит' : 'Нет, морж бодрствует';
+    if (animate) {
+      answerEl.style.opacity = '0';
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () { answerEl.style.opacity = '1'; });
+      });
+    }
+  }
+
+  /* ======================= ЧТЕНИЕ ======================= */
+  function readState() {
+    if (!OWNER || !REPO) return Promise.reject(new Error('Репозиторий не определён'));
+    var url = 'https://raw.githubusercontent.com/' + OWNER + '/' + REPO + '/' +
+              BRANCH + '/' + PATH + '?t=' + Date.now();
+    return fetch(url, { cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        if (typeof data.sleeping !== 'boolean') throw new Error('Некорректный state.json');
+        return data.sleeping;
+      });
+  }
+
+  /* ======================= ЗАПИСЬ ======================= */
+  function writeState(sleeping) {
+    var token = localStorage.getItem(TOKEN_KEY);
+    if (!token) return Promise.reject(new Error('Токен не сохранён'));
+    if (!OWNER || !REPO) return Promise.reject(new Error('Репозиторий не определён'));
+
+    var api = 'https://api.github.com/repos/' + OWNER + '/' + REPO + '/contents/' + PATH;
+    var headers = {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/vnd.github+json',
+      'Content-Type': 'application/json'
+    };
+
+    return fetch(api + '?ref=' + encodeURIComponent(BRANCH), { headers: headers, cache: 'no-store' })
+      .then(function (res) {
+        if (res.ok) return res.json().then(function (j) { return j.sha; });
+        if (res.status === 404) return null;                       // файла ещё нет — создадим
+        return res.json().catch(function () { return {}; }).then(function (e) {
+          throw new Error(e.message || ('HTTP ' + res.status));
+        });
+      })
+      .then(function (sha) {
+        var body = {
+          message: 'Морж: ' + (sleeping ? 'спит' : 'бодрствует'),
+          content: btoa(JSON.stringify({ sleeping: sleeping }, null, 2) + '\n'),
+          branch: BRANCH
+        };
+        if (sha) body.sha = sha;
+
+        return fetch(api, {
+          method: 'PUT',
+          headers: headers,
+          body: JSON.stringify(body)
+        });
+      })
+      .then(function (res) {
+        if (res.ok) return true;
+        return res.json().catch(function () { return {}; }).then(function (e) {
+          throw new Error(e.message || ('HTTP ' + res.status));
+        });
+      });
+  }
+
+  /* ======================= АДМИНКА ======================= */
+  var adminEl   = document.getElementById('admin');
+  var setupEl   = document.getElementById('setup');
+  var controlsEl= document.getElementById('controls');
+  var statusEl  = document.getElementById('status');
+  var tokenInput= document.getElementById('tokenInput');
+
+  function setStatus(text, kind) {
+    statusEl.textContent = text || '';
+    statusEl.className = kind || '';
+  }
+
+  function refreshAdminUI() {
+    var hasToken = !!localStorage.getItem(TOKEN_KEY);
+    setupEl.style.display    = hasToken ? 'none'  : 'flex';
+    controlsEl.style.display = hasToken ? 'flex'  : 'none';
+
+    var visible = hasToken || location.hash === '#admin';
+    adminEl.classList.toggle('show', visible);
+    document.body.classList.toggle('admin-visible', visible);
+  }
+
+  document.getElementById('saveToken').addEventListener('click', function () {
+    var v = tokenInput.value.trim();
+    if (!v) { setStatus('Вставьте токен', 'err'); return; }
+    localStorage.setItem(TOKEN_KEY, v);
+    tokenInput.value = '';
+    setStatus('Токен сохранён ✓', 'ok');
+    refreshAdminUI();
+  });
+
+  tokenInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') document.getElementById('saveToken').click();
+  });
+
+  document.getElementById('logout').addEventListener('click', function () {
+    localStorage.removeItem(TOKEN_KEY);
+    setStatus('Токен удалён с этого устройства', '');
+    location.hash = '';
+    refreshAdminUI();
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-sleep]'), function (btn) {
+    btn.addEventListener('click', function () {
+      var sleeping = btn.getAttribute('data-sleep') === '1';
+      var all = document.querySelectorAll('#controls .btn');
+      Array.prototype.forEach.call(all, function (b) { b.disabled = true; });
+      setStatus('Сохраняю…', '');
+
+      writeState(sleeping)
+        .then(function () {
+          render(sleeping, true);
+          localStorage.setItem(CACHE_KEY, JSON.stringify({ sleeping: sleeping }));
+          setStatus('Готово ✓  ' + (sleeping ? 'Морж спит' : 'Морж бодрствует'), 'ok');
+        })
+        .catch(function (err) {
+          setStatus('Ошибка: ' + err.message, 'err');
+        })
+        .then(function () {
+          Array.prototype.forEach.call(all, function (b) { b.disabled = false; });
+        });
+    });
+  });
+
+  window.addEventListener('hashchange', refreshAdminUI);
+
+  /* ======================= СТАРТ ======================= */
+  function init() {
+    // мгновенно показываем последнее известное значение
+    try {
+      var cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+      if (cached && typeof cached.sleeping === 'boolean') render(cached.sleeping, false);
+      else render(DEFAULT_SLEEPING, false);
+    } catch (e) {
+      render(DEFAULT_SLEEPING, false);
+    }
+
+    refreshAdminUI();
+
+    readState()
+      .then(function (sleeping) {
+        render(sleeping, true);
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ sleeping: sleeping }));
+      })
+      .catch(function (e) {
+        console.warn('Не удалось загрузить состояние:', e.message);
+      });
+  }
+
+  init();
+
+  // тихое обновление раз в минуту (если страница открыта долго)
+  setInterval(function () {
+    readState()
+      .then(function (sleeping) {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ sleeping: sleeping }));
+        if (sleeping !== currentSleeping) render(sleeping, true);
+      })
+      .catch(function () { /* тихо */ });
+  }, 60000);
+
+})();
+</script>
+</body>
+</html>
