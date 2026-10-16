@@ -347,7 +347,7 @@
     }
   }
 
-  /* ======================= ЧТЕНИЕ ======================= */
+  /* ======================= ЧТЕНИЕ (raw) ======================= */
   function readState() {
     if (!OWNER || !REPO) return Promise.reject(new Error('Репозиторий не определён'));
     var url = 'https://raw.githubusercontent.com/' + OWNER + '/' + REPO + '/' +
@@ -406,6 +406,28 @@
       });
   }
 
+  /* ======================= ЧТЕНИЕ (API) ======================= */
+  function readStateViaAPI() {
+    if (!OWNER || !REPO) return Promise.reject(new Error('Репозиторий не определён'));
+    var api = 'https://api.github.com/repos/' + OWNER + '/' + REPO +
+              '/contents/' + PATH + '?ref=' + encodeURIComponent(BRANCH) + '&t=' + Date.now();
+    var headers = { 'Accept': 'application/vnd.github+json' };
+    var token = localStorage.getItem(TOKEN_KEY);
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+
+    return fetch(api, { headers: headers, cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        var raw = atob(data.content.replace(/\s/g, ''));
+        var json = JSON.parse(raw);
+        if (typeof json.sleeping !== 'boolean') throw new Error('Некорректный state.json');
+        return json.sleeping;
+      });
+  }
+
   /* ======================= АДМИНКА ======================= */
   var adminEl   = document.getElementById('admin');
   var setupEl   = document.getElementById('setup');
@@ -459,6 +481,9 @@
         .then(function () {
           render(sleeping, true);
           localStorage.setItem(CACHE_KEY, JSON.stringify({ sleeping: sleeping }));
+          // помечаем значение как «свежее от API», чтобы raw его не перебил
+          lastApiSleeping = sleeping;
+          lastApiTime = Date.now();
           setStatus('Готово ✓  ' + (sleeping ? 'Морж спит' : 'Морж бодрствует'), 'ok');
         })
         .catch(function (err) {
@@ -485,27 +510,64 @@
 
     refreshAdminUI();
 
+    // 1) быстрая попытка через raw
     readState()
       .then(function (sleeping) {
         render(sleeping, true);
         localStorage.setItem(CACHE_KEY, JSON.stringify({ sleeping: sleeping }));
       })
       .catch(function (e) {
-        console.warn('Не удалось загрузить состояние:', e.message);
+        console.warn('Не удалось загрузить состояние (raw):', e.message);
+      });
+
+    // 2) сразу же авторитетная проверка через API
+    readStateViaAPI()
+      .then(function (sleeping) {
+        lastApiSleeping = sleeping;
+        lastApiTime = Date.now();
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ sleeping: sleeping }));
+        if (sleeping !== currentSleeping) render(sleeping, true);
+      })
+      .catch(function (e) {
+        console.warn('Не удалось загрузить состояние (API):', e.message);
       });
   }
 
-  init();
+  /* ======================= ОПРОС ======================= */
+  var lastApiSleeping = null;      // последнее значение, подтверждённое API
+  var lastApiTime = 0;             // когда это было
+  var API_FRESH_MS = 90000;        // считаем API-значение свежим 90 секунд
 
-  // тихое обновление раз в минуту (если страница открыта долго)
+  // быстрый опрос raw-файла раз в 15 секунд
   setInterval(function () {
     readState()
       .then(function (sleeping) {
+        // если API недавно подтвердил другое значение — не перезаписываем устаревшим raw
+        var now = Date.now();
+        if (lastApiSleeping !== null &&
+            (now - lastApiTime) < API_FRESH_MS &&
+            sleeping !== lastApiSleeping) {
+          return;
+        }
         localStorage.setItem(CACHE_KEY, JSON.stringify({ sleeping: sleeping }));
         if (sleeping !== currentSleeping) render(sleeping, true);
       })
       .catch(function () { /* тихо */ });
-  }, 60000);
+  }, 15000);
+
+  // авторитетная проверка через GitHub API раз в 90 секунд
+  setInterval(function () {
+    readStateViaAPI()
+      .then(function (sleeping) {
+        lastApiSleeping = sleeping;
+        lastApiTime = Date.now();
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ sleeping: sleeping }));
+        if (sleeping !== currentSleeping) render(sleeping, true);
+      })
+      .catch(function () { /* тихо */ });
+  }, 90000);
+
+  init();
 
 })();
 </script>
